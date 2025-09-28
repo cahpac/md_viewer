@@ -1,11 +1,41 @@
 #!/usr/bin/env python3
 """
-MD Viewer - A minimal markdown viewer with live preview
-Requirements: Python 3.13.5+, PyQt6, PyQt6-WebEngine, markdown
+MD Viewer - A minimal markdown viewer with live preview and Mermaid diagram support
+
+Version: 2.0.0
+Date: 2024-09-28
+Author: Claude Code Assistant
+License: MIT
+
+Features:
+- Live markdown preview with file watching
+- Drag-and-drop file loading
+- Server-side Mermaid diagram rendering (requires mermaid-cli)
+- Responsive HTML styling
+- Error handling with graceful fallbacks
+
+Requirements:
+- Python 3.13.5+
+- PyQt6 >= 6.7.1
+- PyQt6-WebEngine >= 6.7.0
+- markdown >= 3.6
+- mermaid-cli (optional, for Mermaid diagrams): npm install -g @mermaid-js/mermaid-cli
+
+Changelog:
+v2.0.0 (2024-09-28): Added server-side Mermaid diagram rendering
+v1.0.0 (2024-07-28): Initial release with basic markdown viewing
 """
+
+__version__ = "2.0.0"
+__author__ = "Claude Code Assistant"
+__license__ = "MIT"
 
 import sys
 import time
+import re
+import subprocess
+import tempfile
+import base64
 from pathlib import Path
 from threading import Thread, Event
 
@@ -55,7 +85,7 @@ class MDViewer(QMainWindow):
         self.init_ui()
         
     def init_ui(self):
-        self.setWindowTitle("MD Viewer")
+        self.setWindowTitle(f"MD Viewer v{__version__}")
         self.setGeometry(200, 200, 800, 600)
         
         # Create central widget
@@ -139,7 +169,7 @@ class MDViewer(QMainWindow):
             self.file_watcher = None
             
         self.current_file = Path(filepath)
-        self.setWindowTitle(f"MD Viewer - {self.current_file.name}")
+        self.setWindowTitle(f"MD Viewer v{__version__} - {self.current_file.name}")
         
         # Render the file
         self.render_markdown()
@@ -149,16 +179,78 @@ class MDViewer(QMainWindow):
         self.file_watcher.file_changed.connect(self.render_markdown)
         self.file_watcher.start()
         
+    def process_mermaid_blocks(self, md_content):
+        """Process Mermaid code blocks and convert them to PNG images"""
+        # Pattern to find Mermaid code blocks
+        mermaid_pattern = r'```mermaid\n([\s\S]*?)```'
+
+        def replace_mermaid(match):
+            mermaid_code = match.group(1)
+
+            try:
+                # Create temporary files for input and output
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.mmd', delete=False) as input_file:
+                    input_file.write(mermaid_code)
+                    input_path = input_file.name
+
+                output_path = input_path.replace('.mmd', '.png')
+
+                import os
+                # Get puppeteer config path
+                puppeteer_config = os.path.join(os.path.dirname(__file__), 'puppeteer-config.json')
+
+                # Build command with puppeteer config
+                cmd = ['mmdc', '-i', input_path, '-o', output_path, '-b', 'white', '-t', 'default']
+                if os.path.exists(puppeteer_config):
+                    cmd.extend(['--puppeteerConfigFile', puppeteer_config])
+
+                # Run mermaid-cli to generate PNG
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+
+                if result.returncode == 0 and Path(output_path).exists():
+                    # Read the generated PNG
+                    with open(output_path, 'rb') as f:
+                        png_data = f.read()
+
+                    # Convert to base64 for embedding
+                    png_base64 = base64.b64encode(png_data).decode('utf-8')
+
+                    # Clean up temporary files
+                    Path(input_path).unlink(missing_ok=True)
+                    Path(output_path).unlink(missing_ok=True)
+
+                    # Return the PNG embedded as base64
+                    return f'<div class="mermaid-diagram" style="text-align: center; margin: 2rem 0;"><img src="data:image/png;base64,{png_base64}" alt="Mermaid Diagram" style="max-width: 100%; height: auto;"/></div>'
+                else:
+                    # Fall back to code block if rendering fails
+                    return f'```mermaid\n{mermaid_code}```'
+
+            except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+                # Fall back to code block for any error
+                return f'```mermaid\n{mermaid_code}```'
+
+        # Replace all Mermaid blocks with PNG images
+        return re.sub(mermaid_pattern, replace_mermaid, md_content)
+
     def render_markdown(self):
         """Read and render the current markdown file"""
         if not self.current_file or not self.current_file.exists():
             return
-            
+
         try:
             # Read markdown content
             md_content = self.current_file.read_text(encoding='utf-8')
-            
-            # Convert to HTML
+
+            # Process Mermaid blocks first (convert to SVG)
+            md_content = self.process_mermaid_blocks(md_content)
+
+            # Convert to HTML with HTML allowed
+            import markdown.extensions.md_in_html
             html_content = markdown.markdown(
                 md_content,
                 extensions=[
@@ -166,6 +258,7 @@ class MDViewer(QMainWindow):
                     'codehilite',  # Code highlighting
                     'toc',  # Table of contents
                     'nl2br',  # New line to break
+                    'md_in_html',  # Allow HTML in markdown
                 ]
             )
             
@@ -247,6 +340,10 @@ class MDViewer(QMainWindow):
                         background-color: #e1e4e8;
                         border: 0;
                     }}
+                    .mermaid-diagram {{
+                        text-align: center;
+                        margin: 2rem 0;
+                    }}
                 </style>
             </head>
             <body>
@@ -286,16 +383,24 @@ class MDViewer(QMainWindow):
 
 
 def main():
+    # Handle version argument
+    if len(sys.argv) > 1 and sys.argv[1] in ('--version', '-v'):
+        print(f"MD Viewer v{__version__}")
+        print(f"Author: {__author__}")
+        print(f"License: {__license__}")
+        return
+
     app = QApplication(sys.argv)
     app.setApplicationName("MD Viewer")
-    
+    app.setApplicationVersion(__version__)
+
     viewer = MDViewer()
     viewer.show()
-    
+
     # Handle file argument if provided
     if len(sys.argv) > 1 and sys.argv[1].endswith('.md'):
         viewer.load_file(sys.argv[1])
-    
+
     sys.exit(app.exec())
 
 
