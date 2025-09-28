@@ -5,7 +5,11 @@ a = Analysis(
     ['md_viewer.py'],
     pathex=[],
     binaries=[],
-    datas=[('puppeteer-config.json', '.')],
+    datas=[
+        ('puppeteer-config.json', '.'),
+        ('resources/node_modules', 'node_modules'),
+        ('resources/package.json', '.')
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

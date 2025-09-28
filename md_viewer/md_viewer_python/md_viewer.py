@@ -184,6 +184,14 @@ class MDViewer(QMainWindow):
         # Pattern to find Mermaid code blocks
         mermaid_pattern = r'```mermaid\n([\s\S]*?)```'
 
+        import re
+        mermaid_blocks = re.findall(mermaid_pattern, md_content)
+        print(f"DEBUG: process_mermaid_blocks called, found {len(mermaid_blocks)} mermaid blocks")
+
+        if not mermaid_blocks:
+            print("DEBUG: No mermaid blocks found, returning original content")
+            return md_content
+
         def replace_mermaid(match):
             mermaid_code = match.group(1)
 
@@ -196,20 +204,49 @@ class MDViewer(QMainWindow):
                 output_path = input_path.replace('.mmd', '.png')
 
                 import os
-                # Get puppeteer config path
-                puppeteer_config = os.path.join(os.path.dirname(__file__), 'puppeteer-config.json')
+                import sys
 
-                # Build command with puppeteer config
-                cmd = ['mmdc', '-i', input_path, '-o', output_path, '-b', 'white', '-t', 'default']
+                # Check if running as frozen app
+                if getattr(sys, 'frozen', False):
+                    # Running as bundled app
+                    bundle_dir = sys._MEIPASS
+                    # Use system node with bundled mermaid-cli
+                    node_path = '/usr/local/bin/node'  # macOS typical location
+                    if not os.path.exists(node_path):
+                        node_path = 'node'  # Fallback to PATH
+
+                    # Path to bundled mermaid-cli
+                    mmdc_script = os.path.join(bundle_dir, 'node_modules', '@mermaid-js', 'mermaid-cli', 'src', 'cli.js')
+                    node_modules_path = os.path.join(bundle_dir, 'node_modules')
+                    puppeteer_config = os.path.join(bundle_dir, 'puppeteer-config.json')
+
+                    cmd = [node_path, mmdc_script, '-i', input_path, '-o', output_path, '-b', 'white', '-t', 'default']
+                else:
+                    # Running as script
+                    mmdc_path = '/Users/cahpac/.npm-global/bin/mmdc'
+                    if not os.path.exists(mmdc_path):
+                        mmdc_path = 'mmdc'  # Fallback to PATH lookup
+                    puppeteer_config = os.path.join(os.path.dirname(__file__), 'puppeteer-config.json')
+                    node_modules_path = None
+
+                    cmd = [mmdc_path, '-i', input_path, '-o', output_path, '-b', 'white', '-t', 'default']
                 if os.path.exists(puppeteer_config):
                     cmd.extend(['--puppeteerConfigFile', puppeteer_config])
+
+                # Set up environment for subprocess
+                env = os.environ.copy()
+                if node_modules_path:
+                    env['NODE_PATH'] = node_modules_path
+                    # For bundled app, we need to use system node
+                    env['PATH'] = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 
                 # Run mermaid-cli to generate PNG
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=10,
+                    env=env
                 )
 
                 if result.returncode == 0 and Path(output_path).exists():
