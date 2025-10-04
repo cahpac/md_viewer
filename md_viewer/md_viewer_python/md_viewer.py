@@ -264,12 +264,12 @@ class MDViewer(QMainWindow):
                     # Return the PNG embedded as base64
                     return f'<div class="mermaid-diagram" style="text-align: center; margin: 2rem 0;"><img src="data:image/png;base64,{png_base64}" alt="Mermaid Diagram" style="max-width: 100%; height: auto;"/></div>'
                 else:
-                    # Fall back to code block if rendering fails
-                    return f'```mermaid\n{mermaid_code}```'
+                    # Fall back to client-side Mermaid render
+                    return f'<div class="mermaid">{mermaid_code}</div>'
 
             except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
-                # Fall back to code block for any error
-                return f'```mermaid\n{mermaid_code}```'
+                # Fall back to client-side Mermaid render for any error
+                return f'<div class="mermaid">{mermaid_code}</div>'
 
         # Replace all Mermaid blocks with PNG images
         return re.sub(mermaid_pattern, replace_mermaid, md_content)
@@ -300,13 +300,13 @@ class MDViewer(QMainWindow):
             )
             
             # Wrap in HTML with styling
-            full_html = f"""
+            full_html = """
             <!DOCTYPE html>
             <html>
             <head>
                 <meta charset="utf-8">
                 <style>
-                    body {{
+                    body {
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                         line-height: 1.6;
                         color: #333;
@@ -314,80 +314,103 @@ class MDViewer(QMainWindow):
                         margin: 0 auto;
                         padding: 20px;
                         background-color: #fff;
-                    }}
-                    h1, h2, h3, h4, h5, h6 {{
+                    }
+                    h1, h2, h3, h4, h5, h6 {
                         margin-top: 24px;
                         margin-bottom: 16px;
                         font-weight: 600;
                         line-height: 1.25;
-                    }}
-                    h1 {{ font-size: 2em; border-bottom: 1px solid #eee; padding-bottom: 0.3em; }}
-                    h2 {{ font-size: 1.5em; border-bottom: 1px solid #eee; padding-bottom: 0.3em; }}
-                    h3 {{ font-size: 1.25em; }}
-                    code {{
+                    }
+                    h1 { font-size: 2em; border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
+                    h2 { font-size: 1.5em; border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
+                    h3 { font-size: 1.25em; }
+                    code {
                         background-color: #f6f8fa;
                         padding: 0.2em 0.4em;
                         border-radius: 3px;
                         font-size: 85%;
-                    }}
-                    pre {{
+                    }
+                    pre {
                         background-color: #f6f8fa;
                         padding: 16px;
                         overflow: auto;
                         border-radius: 6px;
                         line-height: 1.45;
-                    }}
-                    pre code {{
+                    }
+                    pre code {
                         background-color: transparent;
                         padding: 0;
-                    }}
-                    blockquote {{
+                    }
+                    blockquote {
                         margin: 0;
                         padding: 0 1em;
                         color: #6a737d;
                         border-left: 0.25em solid #dfe2e5;
-                    }}
-                    table {{
+                    }
+                    table {
                         border-collapse: collapse;
                         width: 100%;
                         margin: 16px 0;
-                    }}
-                    table th, table td {{
+                    }
+                    table th, table td {
                         border: 1px solid #dfe2e5;
                         padding: 6px 13px;
-                    }}
-                    table tr:nth-child(2n) {{
+                    }
+                    table tr:nth-child(2n) {
                         background-color: #f6f8fa;
-                    }}
-                    a {{
+                    }
+                    a {
                         color: #0366d6;
                         text-decoration: none;
-                    }}
-                    a:hover {{
+                    }
+                    a:hover {
                         text-decoration: underline;
-                    }}
-                    img {{
+                    }
+                    img {
                         max-width: 100%;
                         height: auto;
-                    }}
-                    hr {{
+                    }
+                    hr {
                         height: 0.25em;
                         padding: 0;
                         margin: 24px 0;
                         background-color: #e1e4e8;
                         border: 0;
-                    }}
-                    .mermaid-diagram {{
+                    }
+                    .mermaid-diagram {
                         text-align: center;
                         margin: 2rem 0;
-                    }}
+                    }
                 </style>
             </head>
             <body>
                 {html_content}
+                <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+                <script>
+                (function(){
+                  try {
+                    // Convert any remaining ```mermaid blocks rendered as code
+                    var blocks = document.querySelectorAll('pre code.language-mermaid');
+                    blocks.forEach(function(code){
+                      var pre = code.closest('pre');
+                      var div = document.createElement('div');
+                      div.className = 'mermaid';
+                      div.textContent = code.textContent;
+                      pre.replaceWith(div);
+                    });
+                    // Render all .mermaid blocks (including server-side fallback)
+                    if (window.mermaid) {
+                      window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+                      window.mermaid.run({ querySelector: '.mermaid' });
+                    }
+                  } catch (e) { /* ignore */ }
+                })();
+                </script>
             </body>
             </html>
             """
+            # Inject rendered markdown safely without f-string interpolation
+            full_html = full_html.replace("{html_content}", html_content)
             
             # Get current scroll position
             page = self.web_view.page()
