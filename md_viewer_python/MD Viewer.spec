@@ -7,8 +7,6 @@ a = Analysis(
     binaries=[],
     datas=[
         ('puppeteer-config.json', '.'),
-        ('resources/node_modules', 'node_modules'),
-        ('resources/package.json', '.')
     ],
     hiddenimports=[],
     hookspath=[],
@@ -44,5 +42,19 @@ app = BUNDLE(
     exe,
     name='MD Viewer.app',
     icon=None,
-    bundle_identifier=None,
+    bundle_identifier='com.cahpac.mdviewer',
+    info_plist={
+        'CFBundleShortVersionString': '2.0.0',
+        'CFBundleVersion': '2.0.0',
+        'NSHighResolutionCapable': True,
+        'CFBundleDocumentTypes': [
+            {
+                'CFBundleTypeName': 'Markdown Document',
+                'CFBundleTypeRole': 'Viewer',
+                'CFBundleTypeExtensions': ['md', 'markdown', 'mdown', 'mkd'],
+                'CFBundleTypeIconFile': '',
+                'LSHandlerRank': 'Owner',
+            }
+        ],
+    },
 )
