@@ -18,3 +18,4 @@ env/
 # IDE files
 .vscode/
 .idea/
+/md_viewer
