@@ -1,0 +1,20 @@
+# macOS system files
+.DS_Store
+**/.DS_Store
+
+# Build artifacts
+**/build/
+**/dist/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
