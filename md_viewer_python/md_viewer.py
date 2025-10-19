@@ -42,6 +42,7 @@ from threading import Thread, Event
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
 from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QLabel
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebEngineCore import QWebEngineSettings
 import markdown
 
 
@@ -99,6 +100,12 @@ class MDViewer(QMainWindow):
         # Create web view for rendering
         self.web_view = QWebEngineView()
         self.web_view.setAcceptDrops(False)  # We'll handle drops on the window
+
+        # Configure WebEngine settings to allow external resources
+        settings = self.web_view.settings()
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+
         layout.addWidget(self.web_view)
         
         # Enable drag and drop
@@ -192,6 +199,12 @@ class MDViewer(QMainWindow):
             print("DEBUG: No mermaid blocks found, returning original content")
             return md_content
 
+        # For bundled app, skip server-side rendering to avoid security prompts
+        # Client-side Mermaid.js will handle rendering instead
+        if getattr(sys, 'frozen', False):
+            print("DEBUG: Running as bundled app, using client-side Mermaid.js rendering")
+            return md_content
+
         def replace_mermaid(match):
             mermaid_code = match.group(1)
 
@@ -208,8 +221,18 @@ class MDViewer(QMainWindow):
 
                 # Check if running as frozen app
                 if getattr(sys, 'frozen', False):
-                    # Running as bundled app
-                    bundle_dir = sys._MEIPASS
+                    # Running as bundled app - determine bundle resource directory
+                    # For macOS .app bundles, resources are in Contents/Resources
+                    if sys.platform == 'darwin':
+                        # Get the executable path and navigate to Resources
+                        exe_path = sys.executable
+                        bundle_dir = Path(exe_path).parent.parent / 'Resources'
+                    else:
+                        # For other platforms or onefile mode, use _MEIPASS
+                        bundle_dir = Path(getattr(sys, '_MEIPASS', Path(__file__).parent))
+
+                    bundle_dir = str(bundle_dir)
+
                     # Use system node with bundled mermaid-cli
                     node_path = '/usr/local/bin/node'  # macOS typical location
                     if not os.path.exists(node_path):
@@ -381,6 +404,16 @@ class MDViewer(QMainWindow):
                         text-align: center;
                         margin: 2rem 0;
                     }
+                    .mermaid {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+                    }
+                    .mermaid text {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+                        fill: #333 !important;
+                    }
+                    .mermaid .nodeLabel {
+                        color: #333 !important;
+                    }
                 </style>
             </head>
             <body>
@@ -398,12 +431,20 @@ class MDViewer(QMainWindow):
                       div.textContent = code.textContent;
                       pre.replaceWith(div);
                     });
-                    // Render all .mermaid blocks (including server-side fallback)
+                    // Render all .mermaid blocks with explicit theme and font settings
                     if (window.mermaid) {
-                      window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+                      window.mermaid.initialize({
+                        startOnLoad: false,
+                        securityLevel: 'loose',
+                        theme: 'default',
+                        themeVariables: {
+                          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                          fontSize: '14px'
+                        }
+                      });
                       window.mermaid.run({ querySelector: '.mermaid' });
                     }
-                  } catch (e) { /* ignore */ }
+                  } catch (e) { console.error('Mermaid error:', e); }
                 })();
                 </script>
             </body>
