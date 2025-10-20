@@ -26,7 +26,7 @@ v2.0.0 (2024-09-28): Added server-side Mermaid diagram rendering
 v1.0.0 (2024-07-28): Initial release with basic markdown viewing
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0+20251019.git1a6d5eb.macos-arm64"
 __author__ = "Claude Code Assistant"
 __license__ = "MIT"
 
@@ -322,6 +322,21 @@ class MDViewer(QMainWindow):
                 ]
             )
             
+            # Resolve local Mermaid JS for offline rendering
+            try:
+                if getattr(sys, 'frozen', False):
+                    local_mermaid = (Path(sys._MEIPASS) / 'js' / 'mermaid.min.js')  # type: ignore[attr-defined]
+                else:
+                    local_mermaid = Path(__file__).parent / 'resources' / 'js' / 'mermaid.min.js'
+            except Exception:
+                local_mermaid = Path('')
+
+            if local_mermaid.exists():
+                mermaid_src = QUrl.fromLocalFile(str(local_mermaid)).toString()
+            else:
+                # Fallback to CDN if local file not found
+                mermaid_src = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"
+
             # Wrap in HTML with styling
             full_html = """
             <!DOCTYPE html>
@@ -418,7 +433,7 @@ class MDViewer(QMainWindow):
             </head>
             <body>
                 {html_content}
-                <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+                <script src="{mermaid_src}"></script>
                 <script>
                 (function(){
                   try {
@@ -452,6 +467,7 @@ class MDViewer(QMainWindow):
             """
             # Inject rendered markdown safely without f-string interpolation
             full_html = full_html.replace("{html_content}", html_content)
+            full_html = full_html.replace("{mermaid_src}", mermaid_src)
             
             # Get current scroll position
             page = self.web_view.page()

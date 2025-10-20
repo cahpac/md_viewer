@@ -4,7 +4,10 @@ a = Analysis(
     ['md_viewer.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('puppeteer-config.json', '.'),
+        ('resources/js/mermaid.min.js', 'js'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -47,8 +50,8 @@ app = BUNDLE(
     icon=None,
     bundle_identifier='com.cahpac.mdviewer',
     info_plist={
-        'CFBundleShortVersionString': '2.0.0',
-        'CFBundleVersion': '2.0.0',
+        'CFBundleShortVersionString': '2.1.0+20251019.git1a6d5eb.macos-arm64',
+        'CFBundleVersion': '2.1.0+20251019.git1a6d5eb.macos-arm64',
         'NSHighResolutionCapable': True,
         'CFBundleDocumentTypes': [
             {

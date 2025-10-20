@@ -6,6 +6,9 @@
 **/build/
 **/dist/
 
+# Node modules (do not commit bundled deps)
+md_viewer_python/resources/node_modules/
+
 # Python cache
 __pycache__/
 *.pyc
