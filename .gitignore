@@ -22,3 +22,15 @@ env/
 .vscode/
 .idea/
 /md_viewer
+
+# Xcode user-specific files
+**/xcuserdata/
+*.xcuserstate
+
+# Code coverage
+*.profraw
+*.profdata
+
+# Xcode build artifacts
+DerivedData/
+*.xcarchive
