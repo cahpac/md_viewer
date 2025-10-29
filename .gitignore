@@ -5,6 +5,7 @@
 # Build artifacts
 **/build/
 **/dist/
+.build/
 
 # Node modules (do not commit bundled deps)
 md_viewer_python/resources/node_modules/

@@ -145,6 +145,8 @@ class MarkdownViewController: NSViewController {
                     text-align: center;
                     padding: 40px;
                 }
+                .logo { margin-bottom: 16px; }
+                .logo svg { width: 140px; height: auto; display: inline-block; }
                 h1 {
                     color: #000000;
                     font-weight: 300;
@@ -159,6 +161,46 @@ class MarkdownViewController: NSViewController {
         </head>
         <body>
             <div class="welcome">
+                <div class="logo">
+                    <svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stop-color="#0A84FF"/>
+                          <stop offset="100%" stop-color="#2563EB"/>
+                        </linearGradient>
+                        <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stop-color="#22D3EE"/>
+                          <stop offset="100%" stop-color="#14B8A6"/>
+                        </linearGradient>
+                        <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+                          <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#0B1B3A" flood-opacity="0.25"/>
+                        </filter>
+                      </defs>
+
+                      <rect x="64" y="64" width="896" height="896" rx="176" fill="url(#bg)"/>
+
+                      <g filter="url(#shadow)">
+                        <rect x="256" y="208" width="512" height="624" rx="40" fill="#FFFFFF"/>
+                        <rect x="256" y="208" width="512" height="72" rx="40" fill="#EEF6FF"/>
+                        <text x="300" y="360" font-family="-apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif" font-size="120" font-weight="700" fill="#0F172A">#</text>
+                        <rect x="300" y="390" width="384" height="18" rx="9" fill="#E5E7EB"/>
+                        <rect x="300" y="426" width="352" height="18" rx="9" fill="#E5E7EB"/>
+                        <rect x="300" y="462" width="368" height="18" rx="9" fill="#E5E7EB"/>
+                        <rect x="300" y="522" width="404" height="18" rx="9" fill="#E5E7EB"/>
+                        <rect x="300" y="558" width="340" height="18" rx="9" fill="#E5E7EB"/>
+                        <rect x="300" y="594" width="376" height="18" rx="9" fill="#E5E7EB"/>
+                        <rect x="300" y="654" width="240" height="28" rx="14" fill="#F3F4F6"/>
+                      </g>
+
+                      <g transform="translate(688,176) rotate(10)">
+                        <path d="M40 0 L50 30 L80 40 L50 50 L40 80 L30 50 L0 40 L30 30 Z" fill="url(#spark)" opacity="0.95"/>
+                        <circle cx="40" cy="40" r="6" fill="#FFFFFF" opacity="0.9"/>
+                      </g>
+
+                      <path d="M200 352 c0 -24 16 -40 40 -40 h32 v24 h-20 c-8 0 -12 4 -12 12 v248 c0 8 4 12 12 12 h20 v24 h-32 c-24 0 -40 -16 -40 -40 z" fill="#D9E6FF"/>
+                      <path d="M824 352 c0 -24 -16 -40 -40 -40 h-32 v24 h20 c8 0 12 4 12 12 v248 c0 8 -4 12 -12 12 h-20 v24 h32 c24 0 40 -16 40 -40 z" fill="#D9E6FF"/>
+                    </svg>
+                </div>
                 <h1>MD Viewer</h1>
                 <p>Drag a markdown file here to view it</p>
             </div>
@@ -193,6 +235,22 @@ class MarkdownViewController: NSViewController {
             // Convert markdown to HTML using swift-markdown
             let document = Document(parsing: markdownContent)
             let htmlContent = HTMLRenderer().render(document: document)
+
+            // Prefer locally bundled mermaid.min.js, otherwise use CDN in Debug, or a stub in Release
+            let mermaidScriptTag: String = {
+                if let localURL = Bundle.main.url(forResource: "mermaid.min", withExtension: "js"),
+                   let js = try? String(contentsOf: localURL, encoding: .utf8) {
+                    return "<script>\n" + js + "\n</script>"
+                } else {
+                    #if DEBUG
+                    return "<script src=\"https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js\"></script>"
+                    #else
+                    // No network in release: provide a no-op stub so page still loads
+                    let stub = "window.mermaid={initialize:function(){},run:function(){}};"
+                    return "<script>\(stub)</script>"
+                    #endif
+                }
+            }()
 
             // Wrap in styled HTML
             let fullHTML = """
@@ -279,7 +337,7 @@ class MarkdownViewController: NSViewController {
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
                     }
                 </style>
-                <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+                \(mermaidScriptTag)
             </head>
             <body>
                 \(htmlContent)
@@ -472,4 +530,3 @@ struct HTMLRenderer {
             .replacingOccurrences(of: "'", with: "&#39;")
     }
 }
-

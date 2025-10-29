@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1200" height="320" viewBox="0 0 1200 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Monochrome variant (single color) -->
+  <defs>
+    <style>
+      .ink { fill: #0F172A; }
+      .ink-2 { fill: #334155; }
+    </style>
+  </defs>
+  <!-- Logomark outline style -->
+  <g transform="translate(32,32) scale(0.24)">
+    <rect x="64" y="64" width="896" height="896" rx="176" class="ink"/>
+    <rect x="256" y="208" width="512" height="624" rx="40" fill="#FFFFFF"/>
+    <rect x="256" y="208" width="512" height="72" rx="40" fill="#F1F5F9"/>
+    <text x="300" y="360" font-family="-apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif" font-size="120" font-weight="700" class="ink">#</text>
+    <rect x="300" y="390" width="384" height="18" rx="9" class="ink-2" opacity="0.25"/>
+    <rect x="300" y="426" width="352" height="18" rx="9" class="ink-2" opacity="0.25"/>
+    <rect x="300" y="462" width="368" height="18" rx="9" class="ink-2" opacity="0.25"/>
+    <rect x="300" y="522" width="404" height="18" rx="9" class="ink-2" opacity="0.25"/>
+    <rect x="300" y="558" width="340" height="18" rx="9" class="ink-2" opacity="0.25"/>
+    <rect x="300" y="594" width="376" height="18" rx="9" class="ink-2" opacity="0.25"/>
+    <rect x="300" y="654" width="240" height="28" rx="14" class="ink-2" opacity="0.15"/>
+    <path d="M200 352 c0 -24 16 -40 40 -40 h32 v24 h-20 c-8 0 -12 4 -12 12 v248 c0 8 4 12 12 12 h20 v24 h-32 c-24 0 -40 -16 -40 -40 z" class="ink-2" opacity="0.2"/>
+    <path d="M824 352 c0 -24 -16 -40 -40 -40 h-32 v24 h20 c8 0 12 4 12 12 v248 c0 8 -4 12 -12 12 h-20 v24 h32 c24 0 40 -16 40 -40 z" class="ink-2" opacity="0.2"/>
+  </g>
+
+  <!-- Wordmark -->
+  <g transform="translate(320,174)">
+    <text x="0" y="0" font-family="-apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif" font-size="104" font-weight="700" class="ink">MD Viewer</text>
+  </g>
+</svg>
+
