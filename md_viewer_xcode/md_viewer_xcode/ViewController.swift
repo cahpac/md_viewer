@@ -78,6 +78,7 @@ class MarkdownViewController: NSViewController {
     private var currentFileURL: URL?
     private var fileWatcher: DispatchSourceFileSystemObject?
     private var fileDescriptor: Int32 = -1
+    private var reloadDebounceWorkItem: DispatchWorkItem?
 
     override func loadView() {
         // Create container view
@@ -392,37 +393,61 @@ class MarkdownViewController: NSViewController {
 
     func startWatchingFile(url: URL) {
         let path = url.path
-        fileDescriptor = open(path, O_EVTONLY)
+        let fd = open(path, O_EVTONLY)
+        fileDescriptor = fd
 
-        guard fileDescriptor >= 0 else { return }
+        guard fd >= 0 else { return }
 
-        fileWatcher = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fileDescriptor,
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
             eventMask: [.write, .delete, .rename],
             queue: DispatchQueue.main
         )
 
-        fileWatcher?.setEventHandler { [weak self] in
-            self?.renderMarkdown()
-        }
+        source.setEventHandler { [weak self] in
+            guard let self = self, let watcher = self.fileWatcher else { return }
 
-        fileWatcher?.setCancelHandler { [weak self] in
-            if let fd = self?.fileDescriptor, fd >= 0 {
-                close(fd)
+            let events = watcher.data
+
+            // If the file was renamed or deleted (common with atomic saves), re-establish the watch
+            if events.contains(.rename) || events.contains(.delete) {
+                if let url = self.currentFileURL {
+                    // Tear down and restart watching the same path
+                    self.stopWatchingFile()
+                    self.startWatchingFile(url: url)
+                }
             }
+
+            // Debounce rapid sequences of events while the editor writes
+            self.reloadDebounceWorkItem?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                self?.renderMarkdown()
+            }
+            self.reloadDebounceWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
         }
 
-        fileWatcher?.resume()
+        // Important: close the exact fd captured for this watcher to avoid
+        // closing a newly opened descriptor with the same integer value.
+        source.setCancelHandler {
+            close(fd)
+        }
+
+        fileWatcher = source
+        source.resume()
     }
 
     func stopWatchingFile() {
-        fileWatcher?.cancel()
-        fileWatcher = nil
+        // Cancel any pending debounced reload
+        reloadDebounceWorkItem?.cancel()
+        reloadDebounceWorkItem = nil
 
-        if fileDescriptor >= 0 {
-            close(fileDescriptor)
-            fileDescriptor = -1
+        // Cancel the source; its cancel handler will close the captured fd.
+        if let watcher = fileWatcher {
+            watcher.cancel()
         }
+        fileWatcher = nil
+        fileDescriptor = -1
     }
 
     deinit {
