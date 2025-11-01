@@ -461,7 +461,10 @@ extension MarkdownViewController: WKNavigationDelegate {
 
 // MARK: - HTML Renderer for swift-markdown
 
-struct HTMLRenderer {
+class HTMLRenderer {
+    private var currentTable: Table?
+    private var currentColumnIndex: Int = 0
+
     func render(document: Document) -> String {
         var html = ""
         for child in document.children {
@@ -528,10 +531,80 @@ struct HTMLRenderer {
         case _ as ThematicBreak:
             return "<hr />\n"
 
+        case let table as Table:
+            currentTable = table
+            let content = table.children.map { renderMarkup($0) }.joined()
+            currentTable = nil
+            return "<table>\n\(content)</table>\n"
+
+        case let tableHead as Table.Head:
+            let rows = tableHead.children.map { renderMarkup($0) }.joined()
+            return "<thead>\n\(rows)</thead>\n"
+
+        case let tableBody as Table.Body:
+            let rows = tableBody.children.map { renderMarkup($0) }.joined()
+            return "<tbody>\n\(rows)</tbody>\n"
+
+        case let tableRow as Table.Row:
+            currentColumnIndex = 0
+            let cells = tableRow.children.map { renderMarkup($0) }.joined()
+            return "<tr>\n\(cells)</tr>\n"
+
+        case let tableCell as Table.Cell:
+            // Determine if this is a header cell by checking parent hierarchy
+            let tag = isInTableHead(tableCell) ? "th" : "td"
+            let content = tableCell.children.map { renderMarkup($0) }.joined()
+
+            var attributes = ""
+
+            // Add alignment attribute using current column index
+            if let table = currentTable, currentColumnIndex < table.columnAlignments.count {
+                let alignment = table.columnAlignments[currentColumnIndex]
+                let alignValue: String?
+                switch alignment {
+                case .left:
+                    alignValue = "left"
+                case .center:
+                    alignValue = "center"
+                case .right:
+                    alignValue = "right"
+                case .none:
+                    alignValue = nil
+                @unknown default:
+                    alignValue = nil
+                }
+                if let alignValue = alignValue {
+                    attributes += " align=\"\(alignValue)\""
+                }
+            }
+
+            if tableCell.colspan > 1 {
+                attributes += " colspan=\"\(tableCell.colspan)\""
+            }
+            if tableCell.rowspan > 1 {
+                attributes += " rowspan=\"\(tableCell.rowspan)\""
+            }
+
+            // Increment column index for next cell
+            currentColumnIndex += 1
+
+            return "<\(tag)\(attributes)>\(content)</\(tag)>\n"
+
         default:
             // Handle other markup types
             return ""
         }
+    }
+
+    private func isInTableHead(_ markup: Markup) -> Bool {
+        var current: Markup? = markup.parent
+        while let parent = current {
+            if parent is Table.Head {
+                return true
+            }
+            current = parent.parent
+        }
+        return false
     }
 
     private func escapeHTML(_ string: String) -> String {
