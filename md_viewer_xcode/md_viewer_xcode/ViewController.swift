@@ -53,22 +53,10 @@ class DragOverlayView: NSView {
         return true
     }
 
-    // Return self to capture all events including drags
+    // Return nil to allow mouse events to pass through to webView below
+    // Drag operations will still work via registerForDraggedTypes
     override func hitTest(_ point: NSPoint) -> NSView? {
-        return self
-    }
-
-    // Allow mouse events to pass through when not dragging
-    override func mouseDown(with event: NSEvent) {
-        nextResponder?.mouseDown(with: event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        nextResponder?.mouseUp(with: event)
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        nextResponder?.mouseDragged(with: event)
+        return nil
     }
 }
 
