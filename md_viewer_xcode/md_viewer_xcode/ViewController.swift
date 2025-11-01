@@ -70,7 +70,7 @@ class MarkdownViewController: NSViewController {
 
     override func loadView() {
         // Create container view
-        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 1100, height: 600))
         containerView.autoresizingMask = [.width, .height]
 
         // Create web view with proper initial size
@@ -248,15 +248,33 @@ class MarkdownViewController: NSViewController {
             <head>
                 <meta charset="utf-8">
                 <style>
+                    html, body {
+                        margin: 0;
+                        padding: 0;
+                    }
                     body {
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                         line-height: 1.6;
                         color: #333;
-                        max-width: 900px;
+                        max-width: 960px;
                         margin: 0 auto;
-                        padding: 20px 20px 20px 80px;
-                        background: linear-gradient(to right, #f6f8fa 0, #f6f8fa 60px, #d0d7de 60px, #d0d7de 61px, #fff 61px, #fff 100%);
-                        background-attachment: local;
+                        padding: 20px;
+                        padding-left: 100px;
+                        position: relative;
+                        background-color: #fff;
+                        min-height: 100vh;
+                    }
+                    /* Gutter background that moves with body */
+                    body::before {
+                        content: '';
+                        position: absolute;
+                        left: 20px;
+                        top: 0;
+                        height: 100%;
+                        width: 60px;
+                        background-color: #f6f8fa;
+                        border-right: 1px solid #d0d7de;
+                        pointer-events: none;
                     }
                     h1, h2, h3, h4, h5, h6 {
                         margin-top: 0;
@@ -345,8 +363,7 @@ class MarkdownViewController: NSViewController {
                         left: -80px;
                         top: 50%;
                         transform: translateY(-50%);
-                        width: 48px;
-                        padding-right: 12px;
+                        width: 52px;
                         text-align: right;
                         color: #6e7781;
                         font-size: 12px !important;
@@ -358,11 +375,27 @@ class MarkdownViewController: NSViewController {
                     }
                     /* Blank lines */
                     .blank-line {
+                        position: relative;
                         font-size: 16px;
                         line-height: 1.25;
                         margin: 0;
                         padding: 0;
                         height: 1.25em;
+                    }
+                    .blank-line::before {
+                        content: attr(data-line);
+                        position: absolute;
+                        left: -80px;
+                        top: 50%;
+                        transform: translateY(-50%);
+                        width: 52px;
+                        text-align: right;
+                        color: #6e7781;
+                        font-size: 12px !important;
+                        font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+                        line-height: 1;
+                        user-select: none;
+                        -webkit-user-select: none;
                     }
                 </style>
                 \(mermaidScriptTag)
@@ -543,7 +576,7 @@ class HTMLRenderer {
             return html + "<h\(heading.level)\(lineAttr)>\(content)</h\(heading.level)>\n"
 
         case let paragraph as Paragraph:
-            let content = paragraph.children.map { renderMarkup($0) }.joined()
+            let content = paragraph.children.map { renderMarkup($0) }.joined(separator: " ")
             // Only add line numbers to top-level paragraphs, not those inside blockquotes or list items
             let lineAttr = shouldShowLineNumber(for: paragraph) ? lineNumberAttribute(for: paragraph) : ""
             if shouldShowLineNumber(for: paragraph) {
@@ -729,18 +762,58 @@ class HTMLRenderer {
 
     private func updateLastRenderedLine(for markup: Markup) {
         // Update to the last line that this element occupies
-        // Range upperBound is exclusive, so we subtract 1
         if let range = markup.range {
-            let endLine = range.upperBound.line - 1
+            let endLine: Int
+            if range.upperBound.column == 1 {
+                // If upperBound is at column 1, it's at the start of the next line
+                endLine = range.upperBound.line - 1
+            } else {
+                // If upperBound is mid-line, that's the last line
+                endLine = range.upperBound.line
+            }
             lastRenderedLine = max(lastRenderedLine, endLine)
         }
     }
 
     private func lineNumberAttribute(for markup: Markup) -> String {
-        guard let lineNumber = markup.range?.lowerBound.line else {
+        guard let range = markup.range else {
             return ""
         }
-        return " data-line=\"\(lineNumber)\""
+        let startLine = range.lowerBound.line
+        // upperBound.line is the first line of the next element, so the last line
+        // of this element is upperBound.line - 1, BUT we want inclusive end
+        // Check if range spans to a newline character
+        let endLine: Int
+        if range.upperBound.column == 1 {
+            // If upperBound is at column 1, it means it's at the start of the next line
+            // so the actual last line with content is upperBound.line - 1
+            endLine = range.upperBound.line - 1
+        } else {
+            // If upperBound is mid-line, that's the last line
+            endLine = range.upperBound.line
+        }
+
+        // If element spans multiple lines, show as range with abbreviated end
+        if endLine > startLine {
+            let startStr = String(startLine)
+            let endStr = String(endLine)
+
+            // Find common prefix length
+            var commonPrefixLen = 0
+            for (c1, c2) in zip(startStr, endStr) {
+                if c1 == c2 {
+                    commonPrefixLen += 1
+                } else {
+                    break
+                }
+            }
+
+            // Show abbreviated end (only the differing suffix)
+            let endSuffix = String(endStr.dropFirst(commonPrefixLen))
+            return " data-line=\"\(startLine)-\(endSuffix)\""
+        } else {
+            return " data-line=\"\(startLine)\""
+        }
     }
 
     private func escapeHTML(_ string: String) -> String {
