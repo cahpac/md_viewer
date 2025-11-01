@@ -223,7 +223,7 @@ class MarkdownViewController: NSViewController {
 
             // Convert markdown to HTML using swift-markdown
             let document = Document(parsing: markdownContent)
-            let htmlContent = HTMLRenderer().render(document: document)
+            let htmlContent = HTMLRenderer().render(document: document, sourceText: markdownContent)
 
             // Prefer locally bundled mermaid.min.js, otherwise use CDN in Debug, or a stub in Release
             let mermaidScriptTag: String = {
@@ -254,18 +254,27 @@ class MarkdownViewController: NSViewController {
                         color: #333;
                         max-width: 900px;
                         margin: 0 auto;
-                        padding: 20px;
-                        background-color: #fff;
+                        padding: 20px 20px 20px 80px;
+                        background: linear-gradient(to right, #f6f8fa 0, #f6f8fa 60px, #d0d7de 60px, #d0d7de 61px, #fff 61px, #fff 100%);
+                        background-attachment: local;
                     }
                     h1, h2, h3, h4, h5, h6 {
-                        margin-top: 24px;
-                        margin-bottom: 16px;
+                        margin-top: 0;
+                        margin-bottom: 0;
                         font-weight: 600;
                         line-height: 1.25;
                     }
                     h1 { font-size: 2em; border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
                     h2 { font-size: 1.5em; border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
                     h3 { font-size: 1.25em; }
+                    p {
+                        margin: 0;
+                        padding: 0;
+                    }
+                    ul, ol {
+                        margin: 0;
+                        padding-left: 2em;
+                    }
                     code {
                         background-color: #f6f8fa;
                         padding: 0.2em 0.4em;
@@ -276,6 +285,7 @@ class MarkdownViewController: NSViewController {
                     pre {
                         background-color: #f6f8fa;
                         padding: 16px;
+                        margin: 0;
                         overflow: auto;
                         border-radius: 6px;
                         line-height: 1.45;
@@ -293,7 +303,7 @@ class MarkdownViewController: NSViewController {
                     table {
                         border-collapse: collapse;
                         width: 100%;
-                        margin: 16px 0;
+                        margin: 0;
                     }
                     table th, table td {
                         border: 1px solid #dfe2e5;
@@ -316,7 +326,7 @@ class MarkdownViewController: NSViewController {
                     hr {
                         height: 0.25em;
                         padding: 0;
-                        margin: 24px 0;
+                        margin: 0;
                         background-color: #e1e4e8;
                         border: 0;
                     }
@@ -324,6 +334,35 @@ class MarkdownViewController: NSViewController {
                         text-align: center;
                         margin: 2rem 0;
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+                    }
+                    /* Line number gutter */
+                    [data-line] {
+                        position: relative;
+                    }
+                    [data-line]::before {
+                        content: attr(data-line);
+                        position: absolute;
+                        left: -80px;
+                        top: 50%;
+                        transform: translateY(-50%);
+                        width: 48px;
+                        padding-right: 12px;
+                        text-align: right;
+                        color: #6e7781;
+                        font-size: 12px !important;
+                        font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+                        font-weight: normal !important;
+                        line-height: 1;
+                        user-select: none;
+                        -webkit-user-select: none;
+                    }
+                    /* Blank lines */
+                    .blank-line {
+                        font-size: 16px;
+                        line-height: 1.25;
+                        margin: 0;
+                        padding: 0;
+                        height: 1.25em;
                     }
                 </style>
                 \(mermaidScriptTag)
@@ -464,24 +503,53 @@ extension MarkdownViewController: WKNavigationDelegate {
 class HTMLRenderer {
     private var currentTable: Table?
     private var currentColumnIndex: Int = 0
+    private var lastRenderedLine: Int = 0
+    private var totalLines: Int = 0
 
-    func render(document: Document) -> String {
+    func render(document: Document, sourceText: String) -> String {
+        // Count total lines in source
+        totalLines = sourceText.components(separatedBy: .newlines).count
+
         var html = ""
+        lastRenderedLine = 0  // Start at 0 so first element on line 1 works correctly
+
         for child in document.children {
             html += renderMarkup(child)
         }
+
+        // Fill in any remaining lines at the end
+        if lastRenderedLine < totalLines {
+            html += fillGapLines(to: totalLines)
+        }
+
         return html
     }
 
     private func renderMarkup(_ markup: Markup) -> String {
+        var html = ""
+
+        // Fill in any gap lines before this element
+        if let lineNumber = markup.range?.lowerBound.line, shouldShowLineNumber(for: markup) {
+            html += fillGapLines(to: lineNumber - 1)
+        }
+
         switch markup {
         case let heading as Heading:
             let content = heading.children.map { renderMarkup($0) }.joined()
-            return "<h\(heading.level)>\(content)</h\(heading.level)>\n"
+            let lineAttr = shouldShowLineNumber(for: heading) ? lineNumberAttribute(for: heading) : ""
+            if shouldShowLineNumber(for: heading) {
+                updateLastRenderedLine(for: markup)
+            }
+            return html + "<h\(heading.level)\(lineAttr)>\(content)</h\(heading.level)>\n"
 
         case let paragraph as Paragraph:
             let content = paragraph.children.map { renderMarkup($0) }.joined()
-            return "<p>\(content)</p>\n"
+            // Only add line numbers to top-level paragraphs, not those inside blockquotes or list items
+            let lineAttr = shouldShowLineNumber(for: paragraph) ? lineNumberAttribute(for: paragraph) : ""
+            if shouldShowLineNumber(for: paragraph) {
+                updateLastRenderedLine(for: markup)
+            }
+            return html + "<p\(lineAttr)>\(content)</p>\n"
 
         case let text as Text:
             return escapeHTML(text.string)
@@ -500,7 +568,11 @@ class HTMLRenderer {
         case let codeBlock as CodeBlock:
             let language = codeBlock.language ?? ""
             let code = escapeHTML(codeBlock.code)
-            return "<pre><code class=\"language-\(language)\">\(code)</code></pre>\n"
+            let lineAttr = shouldShowLineNumber(for: codeBlock) ? lineNumberAttribute(for: codeBlock) : ""
+            if shouldShowLineNumber(for: codeBlock) {
+                updateLastRenderedLine(for: markup)
+            }
+            return html + "<pre\(lineAttr)><code class=\"language-\(language)\">\(code)</code></pre>\n"
 
         case let link as Link:
             let content = link.children.map { renderMarkup($0) }.joined()
@@ -514,11 +586,19 @@ class HTMLRenderer {
 
         case let list as UnorderedList:
             let items = list.children.map { renderMarkup($0) }.joined()
-            return "<ul>\n\(items)</ul>\n"
+            let lineAttr = shouldShowLineNumber(for: list) ? lineNumberAttribute(for: list) : ""
+            if shouldShowLineNumber(for: list) {
+                updateLastRenderedLine(for: markup)
+            }
+            return html + "<ul\(lineAttr)>\n\(items)</ul>\n"
 
         case let list as OrderedList:
             let items = list.children.map { renderMarkup($0) }.joined()
-            return "<ol start=\"\(list.startIndex)\">\n\(items)</ol>\n"
+            let lineAttr = shouldShowLineNumber(for: list) ? lineNumberAttribute(for: list) : ""
+            if shouldShowLineNumber(for: list) {
+                updateLastRenderedLine(for: markup)
+            }
+            return html + "<ol start=\"\(list.startIndex)\"\(lineAttr)>\n\(items)</ol>\n"
 
         case let item as ListItem:
             let content = item.children.map { renderMarkup($0) }.joined()
@@ -526,16 +606,28 @@ class HTMLRenderer {
 
         case let blockQuote as BlockQuote:
             let content = blockQuote.children.map { renderMarkup($0) }.joined()
-            return "<blockquote>\(content)</blockquote>\n"
+            let lineAttr = shouldShowLineNumber(for: blockQuote) ? lineNumberAttribute(for: blockQuote) : ""
+            if shouldShowLineNumber(for: blockQuote) {
+                updateLastRenderedLine(for: markup)
+            }
+            return html + "<blockquote\(lineAttr)>\(content)</blockquote>\n"
 
-        case _ as ThematicBreak:
-            return "<hr />\n"
+        case let thematicBreak as ThematicBreak:
+            let lineAttr = shouldShowLineNumber(for: thematicBreak) ? lineNumberAttribute(for: thematicBreak) : ""
+            if shouldShowLineNumber(for: thematicBreak) {
+                updateLastRenderedLine(for: markup)
+            }
+            return html + "<hr\(lineAttr) />\n"
 
         case let table as Table:
             currentTable = table
             let content = table.children.map { renderMarkup($0) }.joined()
             currentTable = nil
-            return "<table>\n\(content)</table>\n"
+            let lineAttr = shouldShowLineNumber(for: table) ? lineNumberAttribute(for: table) : ""
+            if shouldShowLineNumber(for: table) {
+                updateLastRenderedLine(for: markup)
+            }
+            return html + "<table\(lineAttr)>\n\(content)</table>\n"
 
         case let tableHead as Table.Head:
             let rows = tableHead.children.map { renderMarkup($0) }.joined()
@@ -605,6 +697,50 @@ class HTMLRenderer {
             current = parent.parent
         }
         return false
+    }
+
+    private func shouldShowLineNumber(for markup: Markup) -> Bool {
+        // Don't show line numbers for elements nested inside blockquotes, list items, or tables
+        var current: Markup? = markup.parent
+        while let parent = current {
+            if parent is BlockQuote || parent is ListItem || parent is Table.Cell {
+                return false
+            }
+            current = parent.parent
+        }
+        return true
+    }
+
+    private func fillGapLines(to targetLine: Int) -> String {
+        var html = ""
+        // Only create blank lines for gaps between rendered content
+        let startLine = lastRenderedLine + 1
+        let endLine = targetLine
+
+        // Only fill if there are actually gaps
+        guard startLine <= endLine else { return html }
+
+        for lineNum in startLine...endLine {
+            lastRenderedLine = lineNum
+            html += "<div data-line=\"\(lineNum)\" class=\"blank-line\">&nbsp;</div>\n"
+        }
+        return html
+    }
+
+    private func updateLastRenderedLine(for markup: Markup) {
+        // Update to the last line that this element occupies
+        // Range upperBound is exclusive, so we subtract 1
+        if let range = markup.range {
+            let endLine = range.upperBound.line - 1
+            lastRenderedLine = max(lastRenderedLine, endLine)
+        }
+    }
+
+    private func lineNumberAttribute(for markup: Markup) -> String {
+        guard let lineNumber = markup.range?.lowerBound.line else {
+            return ""
+        }
+        return " data-line=\"\(lineNumber)\""
     }
 
     private func escapeHTML(_ string: String) -> String {
