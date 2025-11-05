@@ -1,0 +1,177 @@
+name: Check Mermaid.js Updates
+
+on:
+  schedule:
+    # Runs every Monday at 9:00 AM UTC
+    - cron: '0 9 * * 1'
+
+  # Allows manual triggering from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check-mermaid-version:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get current bundled version
+        id: current
+        run: |
+          # Extract version from the bundled file or use hardcoded value
+          CURRENT_VERSION="10.9.5"
+          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current bundled version: $CURRENT_VERSION"
+
+      - name: Get latest Mermaid version from npm
+        id: latest
+        run: |
+          LATEST_VERSION=$(curl -s https://registry.npmjs.org/mermaid/latest | jq -r '.version')
+          echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Latest npm version: $LATEST_VERSION"
+
+      - name: Compare versions
+        id: compare
+        run: |
+          CURRENT="${{ steps.current.outputs.version }}"
+          LATEST="${{ steps.latest.outputs.version }}"
+
+          if [ "$CURRENT" != "$LATEST" ]; then
+            echo "update_available=true" >> $GITHUB_OUTPUT
+            echo "✨ Update available: $CURRENT → $LATEST"
+          else
+            echo "update_available=false" >> $GITHUB_OUTPUT
+            echo "✅ Already up to date: $CURRENT"
+          fi
+
+      - name: Check for existing update issue
+        if: steps.compare.outputs.update_available == 'true'
+        id: check_issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'mermaid-update'
+            });
+
+            const latestVersion = '${{ steps.latest.outputs.version }}';
+            const existingIssue = issues.data.find(issue =>
+              issue.title.includes(latestVersion)
+            );
+
+            if (existingIssue) {
+              console.log('Issue already exists:', existingIssue.number);
+              core.setOutput('issue_exists', 'true');
+            } else {
+              console.log('No existing issue found');
+              core.setOutput('issue_exists', 'false');
+            }
+
+      - name: Create GitHub issue for update
+        if: steps.compare.outputs.update_available == 'true' && steps.check_issue.outputs.issue_exists == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const currentVersion = '${{ steps.current.outputs.version }}';
+            const latestVersion = '${{ steps.latest.outputs.version }}';
+
+            const issueBody = `## 🔄 Mermaid.js Update Available
+
+A new version of Mermaid.js is available!
+
+**Current bundled version:** v${currentVersion}
+**Latest available version:** v${latestVersion}
+
+### 📋 Release Information
+
+- **Release Notes:** https://github.com/mermaid-js/mermaid/releases/tag/v${latestVersion}
+- **NPM Package:** https://www.npmjs.com/package/mermaid/v/${latestVersion}
+- **Download URL:** https://cdn.jsdelivr.net/npm/mermaid@${latestVersion}/dist/mermaid.min.js
+
+---
+
+## 📦 Manual Update Instructions
+
+### 1. Download the new version
+
+\`\`\`bash
+curl -o md_viewer_xcode/mermaid.min.js \\
+  https://cdn.jsdelivr.net/npm/mermaid@${latestVersion}/dist/mermaid.min.js
+\`\`\`
+
+### 2. Update the version constant
+
+Edit \`md_viewer_xcode/ViewController.swift\` and update the mermaid version reference if present.
+
+### 3. Test the update
+
+- [ ] Build the app in Xcode
+- [ ] Open a markdown file with Mermaid diagrams
+- [ ] Verify diagrams render correctly
+- [ ] Check that iframe sandboxing still works
+- [ ] Test with various diagram types (flowchart, sequence, etc.)
+- [ ] Verify no console errors in WKWebView
+
+### 4. Commit the changes
+
+\`\`\`bash
+git add md_viewer_xcode/mermaid.min.js
+git commit -m "chore: update Mermaid.js to v${latestVersion}"
+git push
+\`\`\`
+
+### 5. Optional: Update version in this workflow
+
+Update the \`CURRENT_VERSION\` in \`.github/workflows/check-mermaid-updates.yml\` to \`${latestVersion}\`
+
+---
+
+## ⚠️ Breaking Changes
+
+Before updating, review the [release notes](https://github.com/mermaid-js/mermaid/releases/tag/v${latestVersion}) for any breaking changes that might affect:
+- Diagram syntax
+- Rendering behavior
+- Security settings
+- Configuration options
+
+---
+
+🤖 *This issue was created automatically by [GitHub Actions](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*`;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: \`🔄 Mermaid.js update available: v\${latestVersion}\`,
+              body: issueBody,
+              labels: ['dependencies', 'mermaid-update', 'automated']
+            });
+
+            console.log('✅ Issue created successfully');
+
+      - name: Summary
+        run: |
+          echo "## Check Mermaid.js Updates Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Current Version:** ${{ steps.current.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Latest Version:** ${{ steps.latest.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.compare.outputs.update_available }}" == "true" ]; then
+            echo "✨ **Status:** Update available" >> $GITHUB_STEP_SUMMARY
+
+            if [ "${{ steps.check_issue.outputs.issue_exists }}" == "true" ]; then
+              echo "ℹ️ **Note:** Issue already exists for this version" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ **Action:** GitHub issue created" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "✅ **Status:** Up to date" >> $GITHUB_STEP_SUMMARY
+          fi

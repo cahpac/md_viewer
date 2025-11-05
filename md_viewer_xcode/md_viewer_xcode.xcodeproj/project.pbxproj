@@ -36,7 +36,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		9DF265FF2EA5E1C2009176AB /* Exceptions for "md_viewer_xcode" folder in "Copy Bundle Resources" phase from "md_viewer_xcode" target */ = {
+		9DF265FF2EA5E1C2009176AB /* Exceptions for "md_viewer_xcode" folder in "md_viewer_xcode" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -49,7 +49,7 @@
 		9DF265012EA5E1C2009176AB /* md_viewer_xcode */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				9DF265FF2EA5E1C2009176AB /* Exceptions for "md_viewer_xcode" folder in "Copy Bundle Resources" phase from "md_viewer_xcode" target */,
+				9DF265FF2EA5E1C2009176AB /* Exceptions for "md_viewer_xcode" folder in "md_viewer_xcode" target */,
 			);
 			path = md_viewer_xcode;
 			sourceTree = "<group>";
@@ -433,7 +433,6 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = md_viewer_xcode/Info.plist;
-
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -465,7 +464,6 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = md_viewer_xcode/Info.plist;
-
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
