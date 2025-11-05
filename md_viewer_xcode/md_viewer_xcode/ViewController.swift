@@ -348,6 +348,17 @@ class MarkdownViewController: NSViewController {
                         background-color: #e1e4e8;
                         border: 0;
                     }
+                    del {
+                        text-decoration: line-through;
+                        opacity: 0.7;
+                    }
+                    input[type="checkbox"] {
+                        margin-right: 0.5em;
+                        vertical-align: middle;
+                    }
+                    .html-block {
+                        margin: 0;
+                    }
                     .mermaid {
                         text-align: center;
                         margin: 2rem 0;
@@ -595,8 +606,18 @@ class HTMLRenderer {
             let content = emphasis.children.map { renderMarkup($0) }.joined()
             return "<em>\(content)</em>"
 
+        case let strikethrough as Strikethrough:
+            let content = strikethrough.children.map { renderMarkup($0) }.joined()
+            return "<del>\(content)</del>"
+
         case let inlineCode as InlineCode:
             return "<code>\(escapeHTML(inlineCode.code))</code>"
+
+        case _ as LineBreak:
+            return "<br />"
+
+        case _ as SoftBreak:
+            return "\n"
 
         case let codeBlock as CodeBlock:
             let language = codeBlock.language ?? ""
@@ -635,6 +656,11 @@ class HTMLRenderer {
 
         case let item as ListItem:
             let content = item.children.map { renderMarkup($0) }.joined()
+            if let checkbox = item.checkbox {
+                let checked = checkbox == .checked ? "checked" : ""
+                let checkboxHTML = "<input type=\"checkbox\" \(checked) disabled /> "
+                return "<li style=\"list-style-type: none;\">\(checkboxHTML)\(content)</li>\n"
+            }
             return "<li>\(content)</li>\n"
 
         case let blockQuote as BlockQuote:
@@ -651,6 +677,16 @@ class HTMLRenderer {
                 updateLastRenderedLine(for: markup)
             }
             return html + "<hr\(lineAttr) />\n"
+
+        case let htmlBlock as HTMLBlock:
+            let lineAttr = shouldShowLineNumber(for: htmlBlock) ? lineNumberAttribute(for: htmlBlock) : ""
+            if shouldShowLineNumber(for: htmlBlock) {
+                updateLastRenderedLine(for: markup)
+            }
+            return html + "<div\(lineAttr) class=\"html-block\">\(htmlBlock.rawHTML)</div>\n"
+
+        case let inlineHTML as InlineHTML:
+            return inlineHTML.rawHTML
 
         case let table as Table:
             currentTable = table
