@@ -76,6 +76,9 @@ class MarkdownViewController: NSViewController {
         // Create web view with proper initial size
         let configuration = WKWebViewConfiguration()
 
+        // Security: Use non-persistent data store (no cookies/localStorage)
+        configuration.websiteDataStore = .nonPersistent()
+
         // Configure preferences
         let preferences = WKWebpagePreferences()
         preferences.allowsContentJavaScript = true
@@ -251,12 +254,32 @@ class MarkdownViewController: NSViewController {
                 }
             }()
 
+            // For iframes, use CDN or stub (can't easily inline large scripts in srcdoc)
+            let mermaidScriptSrc: String = {
+                if Bundle.main.url(forResource: "mermaid.min", withExtension: "js") != nil {
+                    // If we have local mermaid, we'd need to serve it via file:// URL
+                    // For now, fall back to CDN in debug or stub in release
+                    #if DEBUG
+                    return "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"
+                    #else
+                    return "" // Will use stub
+                    #endif
+                } else {
+                    #if DEBUG
+                    return "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"
+                    #else
+                    return "" // Will use stub
+                    #endif
+                }
+            }()
+
             // Wrap in styled HTML
             let fullHTML = """
             <!DOCTYPE html>
             <html>
             <head>
                 <meta charset="utf-8">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: https:; connect-src 'none';">
                 <style>
                     html, body {
                         margin: 0;
@@ -426,29 +449,70 @@ class MarkdownViewController: NSViewController {
                 <script>
                 (function(){
                   try {
-                    // Convert code blocks with language-mermaid to mermaid divs
-                    var blocks = document.querySelectorAll('pre code.language-mermaid, pre code[class*="mermaid"]');
-                    blocks.forEach(function(code){
-                      var pre = code.closest('pre');
-                      var div = document.createElement('div');
-                      div.className = 'mermaid';
-                      div.textContent = code.textContent;
-                      pre.replaceWith(div);
-                    });
-                    // Initialize and render mermaid
-                    if (window.mermaid) {
-                      window.mermaid.initialize({
-                        startOnLoad: false,
-                        securityLevel: 'loose',
-                        theme: 'default',
-                        themeVariables: {
-                          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-                          fontSize: '14px'
+                    // Function to resize iframe by directly accessing contentDocument
+                    function resizeIframe(iframe) {
+                      try {
+                        if (iframe.contentDocument) {
+                          var height = Math.max(
+                            iframe.contentDocument.body.scrollHeight,
+                            iframe.contentDocument.documentElement.scrollHeight,
+                            iframe.contentDocument.body.offsetHeight
+                          );
+                          if (height > 0) {
+                            iframe.style.height = height + 'px';
+                          }
                         }
-                      });
-                      window.mermaid.run({ querySelector: '.mermaid' });
+                      } catch (e) {
+                        // Silently fail if iframe content is not accessible
+                      }
                     }
-                  } catch (e) { console.error('Mermaid error:', e); }
+
+                    // Convert code blocks with language-mermaid to sandboxed iframes
+                    var blocks = document.querySelectorAll('pre code.language-mermaid, pre code[class*="mermaid"]');
+                    blocks.forEach(function(code, index){
+                      var pre = code.closest('pre');
+                      var mermaidCode = code.textContent;
+                      var iframeId = 'mermaid-iframe-' + index;
+
+                      // Escape HTML for srcdoc attribute
+                      var escapedCode = mermaidCode.replace(/&/g, '&amp;')
+                                                   .replace(/</g, '&lt;')
+                                                   .replace(/>/g, '&gt;')
+                                                   .replace(/"/g, '&quot;')
+                                                   .replace(/'/g, '&#39;');
+
+                      // Create iframe content with Mermaid
+                      var mermaidSrc = '\(mermaidScriptSrc)';
+                      var scriptTag = mermaidSrc ? '<scr'+'ipt src="' + mermaidSrc + '"></scr'+'ipt>' : '<scr'+'ipt>window.mermaid={initialize:function(){},run:function(){return Promise.resolve();}};</scr'+'ipt>';
+                      var iframeContent = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:1rem;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}.mermaid{text-align:center;}svg{max-width:100%;height:auto;}</style>' + scriptTag + '</head><body><div class="mermaid">' + escapedCode + '</div><scr'+'ipt>function notifyReady(){window.frameElement.setAttribute("data-ready","true");}function initMermaid(){if(window.mermaid){mermaid.initialize({startOnLoad:false,securityLevel:"strict",theme:"default",themeVariables:{fontFamily:"-apple-system,BlinkMacSystemFont,\\"Segoe UI\\",sans-serif",fontSize:"14px"}});mermaid.run().then(function(){setTimeout(notifyReady,100);}).catch(function(e){console.error("Mermaid error:",e);notifyReady();});}else{setTimeout(notifyReady,100);}}if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",function(){setTimeout(initMermaid,500);});}else{setTimeout(initMermaid,500);}</scr'+'ipt></body></html>';
+
+                      // Create iframe element
+                      var iframe = document.createElement('iframe');
+                      iframe.id = iframeId;
+                      iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+                      iframe.setAttribute('srcdoc', iframeContent);
+                      iframe.style.border = '0';
+                      iframe.style.width = '100%';
+                      iframe.style.display = 'block';
+                      iframe.style.margin = '2rem 0';
+                      iframe.style.minHeight = '200px';
+                      iframe.scrolling = 'no';
+
+                      // Poll for ready state and resize
+                      var resizeAttempts = 0;
+                      var resizeInterval = setInterval(function() {
+                        resizeAttempts++;
+                        if (iframe.getAttribute('data-ready') === 'true' || resizeAttempts > 20) {
+                          clearInterval(resizeInterval);
+                          setTimeout(function() { resizeIframe(iframe); }, 100);
+                          setTimeout(function() { resizeIframe(iframe); }, 500);
+                          setTimeout(function() { resizeIframe(iframe); }, 1000);
+                        }
+                      }, 100);
+
+                      pre.replaceWith(iframe);
+                    });
+                  } catch (e) { console.error('Mermaid iframe error:', e); }
                 })();
                 </script>
             </body>
