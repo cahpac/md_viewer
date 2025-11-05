@@ -107,6 +107,10 @@ class MarkdownViewController: NSViewController {
     }
 
     func showWelcome() {
+        // Get version information
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+
         let html = """
         <!DOCTYPE html>
         <html>
@@ -145,6 +149,11 @@ class MarkdownViewController: NSViewController {
                 p {
                     color: #666666;
                     font-size: 18px;
+                }
+                .version {
+                    color: #999999;
+                    font-size: 14px;
+                    margin-top: 12px;
                 }
             </style>
         </head>
@@ -192,6 +201,7 @@ class MarkdownViewController: NSViewController {
                 </div>
                 <h1>MD Viewer</h1>
                 <p>Drag a markdown file here to view it</p>
+                <p class="version">Version \(version) (Build \(build))</p>
             </div>
         </body>
         </html>
@@ -523,6 +533,68 @@ class MarkdownViewController: NSViewController {
 
     deinit {
         stopWatchingFile()
+    }
+
+    // MARK: - Clipboard Support
+
+    func copySelection() {
+        webView.evaluateJavaScript("window.getSelection().toString()") { [weak self] result, error in
+            if let selectedText = result as? String, !selectedText.isEmpty {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(selectedText, forType: .string)
+            }
+        }
+    }
+
+    func selectAll() {
+        webView.evaluateJavaScript("document.execCommand('selectAll', false, null)")
+    }
+
+    func showInFinder() {
+        guard let fileURL = currentFileURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+    }
+
+    // MARK: - Find Feature
+
+    func showFindPanel() {
+        let alert = NSAlert()
+        alert.messageText = "Find"
+        alert.informativeText = "Search for text in the document:"
+        alert.addButton(withTitle: "Find")
+        alert.addButton(withTitle: "Cancel")
+
+        let inputTextField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        inputTextField.placeholderString = "Enter search text"
+        alert.accessoryView = inputTextField
+
+        alert.window.initialFirstResponder = inputTextField
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            let searchText = inputTextField.stringValue
+            if !searchText.isEmpty {
+                performFind(searchText: searchText)
+            }
+        }
+    }
+
+    private func performFind(searchText: String) {
+        let escapedSearch = searchText.replacingOccurrences(of: "\\", with: "\\\\")
+                                      .replacingOccurrences(of: "'", with: "\\'")
+
+        let script = """
+        (function() {
+            window.find('\(escapedSearch)', false, false, true, false, true, false);
+        })();
+        """
+
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                print("Find error: \\(error)")
+            }
+        }
     }
 }
 

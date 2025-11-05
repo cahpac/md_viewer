@@ -76,15 +76,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let fileMenu = NSMenu(title: "File")
         fileMenuItem.submenu = fileMenu
         fileMenu.addItem(NSMenuItem(title: "Open...", action: #selector(openDocument(_:)), keyEquivalent: "o"))
+        fileMenu.addItem(NSMenuItem(title: "Show in Finder", action: #selector(showInFinder(_:)), keyEquivalent: "r"))
         fileMenu.addItem(NSMenuItem.separator())
         fileMenu.addItem(NSMenuItem(title: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+
+        // Edit menu
+        let editMenuItem = NSMenuItem()
+        mainMenu.addItem(editMenuItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenuItem.submenu = editMenu
+        editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(selectAll(_:)), keyEquivalent: "a"))
+        editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(NSMenuItem(title: "Find...", action: #selector(showFind(_:)), keyEquivalent: "f"))
 
         // Window menu
         let windowMenuItem = NSMenuItem()
         mainMenu.addItem(windowMenuItem)
         let windowMenu = NSMenu(title: "Window")
         windowMenuItem.submenu = windowMenu
-        windowMenu.addItem(NSMenuItem(title: "Show Window Size", action: #selector(showWindowSize(_:)), keyEquivalent: "i"))
+
+        // Toggle fullscreen with Cmd+Ctrl+F
+        let fullscreenItem = NSMenuItem(title: "Toggle Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        fullscreenItem.keyEquivalentModifierMask = [.command, .control]
+        windowMenu.addItem(fullscreenItem)
+        windowMenu.addItem(NSMenuItem.separator())
+
+        windowMenu.addItem(NSMenuItem(title: "Snap to 1100px Width", action: #selector(snapWindowWidth(_:)), keyEquivalent: "i"))
 
         NSApp.mainMenu = mainMenu
     }
@@ -104,14 +122,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc func showWindowSize(_ sender: Any?) {
-        let size = window.frame.size
-        let alert = NSAlert()
-        alert.messageText = "Window Dimensions"
-        alert.informativeText = "Width: \(Int(size.width)) px\nHeight: \(Int(size.height)) px"
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+    @objc func snapWindowWidth(_ sender: Any?) {
+        var frame = window.frame
+        frame.size.width = 1100
+        window.setFrame(frame, display: true, animate: true)
+    }
+
+    @objc func copy(_ sender: Any?) {
+        if let viewController = window.contentViewController as? MarkdownViewController {
+            viewController.copySelection()
+        }
+    }
+
+    @objc func selectAll(_ sender: Any?) {
+        if let viewController = window.contentViewController as? MarkdownViewController {
+            viewController.selectAll()
+        }
+    }
+
+    @objc func showInFinder(_ sender: Any?) {
+        if let viewController = window.contentViewController as? MarkdownViewController {
+            viewController.showInFinder()
+        }
+    }
+
+    @objc func showFind(_ sender: Any?) {
+        if let viewController = window.contentViewController as? MarkdownViewController {
+            viewController.showFindPanel()
+        }
     }
 
     @objc func handleGetURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent replyEvent: NSAppleEventDescriptor) {
