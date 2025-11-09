@@ -109,6 +109,17 @@ class MarkdownViewController: NSViewController {
         showWelcome()
     }
 
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        // Make sure the view can receive keyboard events
+        view.window?.makeFirstResponder(self)
+        print("DEBUG: ViewController set as first responder")
+    }
+
+    override var acceptsFirstResponder: Bool {
+        return true
+    }
+
     func showWelcome() {
         // Get version information
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
@@ -295,6 +306,7 @@ class MarkdownViewController: NSViewController {
                         margin-bottom: 0;
                         font-weight: 600;
                         line-height: 1.25;
+                        scroll-margin-top: 4.8em; /* Show 3 lines above when navigating via TOC links */
                     }
                     h1 { font-size: 2em; border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
                     h2 { font-size: 1.5em; border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
@@ -515,6 +527,86 @@ class MarkdownViewController: NSViewController {
 
                   } catch (e) { console.error('Mermaid setup error:', e); }
                 })();
+
+                // Keyboard navigation for TOC
+                (function() {
+                  let lastUpKeyTime = 0;
+                  const doubleKeyThreshold = 500; // ms
+
+                  // Get all headings with IDs (TOC targets)
+                  function getAllHeadings() {
+                    return Array.from(document.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]'));
+                  }
+
+                  // Find the current visible heading or the one we're closest to
+                  function getCurrentHeadingIndex() {
+                    const headings = getAllHeadings();
+                    const scrollPos = window.scrollY;
+
+                    // Find the heading that's currently visible or just passed
+                    for (let i = headings.length - 1; i >= 0; i--) {
+                      const heading = headings[i];
+                      const rect = heading.getBoundingClientRect();
+                      const absoluteTop = scrollPos + rect.top;
+
+                      // Account for scroll-margin-top offset (4.8em ≈ 77px)
+                      if (absoluteTop <= scrollPos + 100) {
+                        return i;
+                      }
+                    }
+                    return -1;
+                  }
+
+                  // Navigate to a heading
+                  function navigateToHeading(heading) {
+                    if (heading && heading.id) {
+                      heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }
+
+                  // Keyboard event handler
+                  document.addEventListener('keydown', function(e) {
+                    // Check for Shift + Arrow keys
+                    if (!e.shiftKey) return;
+
+                    const headings = getAllHeadings();
+                    if (headings.length === 0) return;
+
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+
+                      const now = Date.now();
+                      const timeSinceLastUp = now - lastUpKeyTime;
+                      lastUpKeyTime = now;
+
+                      // Shift + Up + Up (double press) = Go to top
+                      if (timeSinceLastUp < doubleKeyThreshold) {
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                        lastUpKeyTime = 0; // Reset so triple press doesn't trigger
+                      } else {
+                        // Shift + Up = Previous TOC
+                        const currentIndex = getCurrentHeadingIndex();
+                        if (currentIndex > 0) {
+                          navigateToHeading(headings[currentIndex - 1]);
+                        } else if (currentIndex === -1 && headings.length > 0) {
+                          // If we're before the first heading, go to first heading
+                          navigateToHeading(headings[0]);
+                        }
+                      }
+                    } else if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      lastUpKeyTime = 0; // Reset double-press detection
+
+                      // Shift + Down = Next TOC
+                      const currentIndex = getCurrentHeadingIndex();
+                      if (currentIndex < headings.length - 1) {
+                        navigateToHeading(headings[currentIndex + 1]);
+                      }
+                    }
+                  });
+
+                  console.log('Keyboard navigation loaded. Use Shift+Up (twice for top), Shift+Down for TOC navigation.');
+                })();
                 </script>
             </body>
             </html>
@@ -661,15 +753,248 @@ class MarkdownViewController: NSViewController {
             }
         }
     }
+
+    // MARK: - Keyboard Navigation
+
+    private var lastUpKeyTime: TimeInterval = 0
+    private let doubleKeyThreshold: TimeInterval = 0.5 // 500ms
+
+    override func keyDown(with event: NSEvent) {
+        print("DEBUG: keyDown received - keyCode: \(event.keyCode), modifiers: \(event.modifierFlags)")
+
+        // Handle Shift + Arrow keys for TOC navigation
+        if event.modifierFlags.contains(.shift) {
+            print("DEBUG: Shift key detected")
+            if event.keyCode == 126 { // Up arrow
+                print("DEBUG: Shift+Up detected - calling handleShiftUpArrow()")
+                handleShiftUpArrow()
+                return
+            } else if event.keyCode == 125 { // Down arrow
+                print("DEBUG: Shift+Down detected - calling handleShiftDownArrow()")
+                handleShiftDownArrow()
+                return
+            }
+        }
+
+        // Let other key events pass through
+        super.keyDown(with: event)
+    }
+
+    private func handleShiftUpArrow() {
+        print("DEBUG: handleShiftUpArrow() called")
+        let now = Date().timeIntervalSince1970
+        let timeSinceLastUp = now - lastUpKeyTime
+        lastUpKeyTime = now
+
+        // Double press = Go to top
+        if timeSinceLastUp < doubleKeyThreshold {
+            print("DEBUG: Double press detected - scrolling to top")
+            scrollToTop()
+            lastUpKeyTime = 0 // Reset
+        } else {
+            print("DEBUG: Single Shift+Up press - ignoring (only double-press supported)")
+        }
+    }
+
+    private func handleShiftDownArrow() {
+        print("DEBUG: handleShiftDownArrow() called - ignoring (feature removed)")
+        lastUpKeyTime = 0 // Reset double-press detection
+    }
+
+    private func scrollToTop() {
+        let script = "window.scrollTo({ top: 0, behavior: 'smooth' });"
+        webView.evaluateJavaScript(script) { _, error in
+            if let error = error {
+                print("Scroll to top error: \(error)")
+            }
+        }
+    }
+
+    private func navigateToNextHeading() {
+        print("DEBUG: navigateToNextHeading() called - about to execute JavaScript")
+
+        let script = """
+        (function() {
+            // Get all h2 headings, skip 'Table of Contents' heading
+            const allH2 = Array.from(document.querySelectorAll('h2[id]'));
+            const headings = allH2.filter(h => !h.textContent.trim().toLowerCase().includes('table of contents'));
+
+            if (headings.length === 0) {
+                return { status: 'no_headings' };
+            }
+
+            const scrollPos = window.scrollY;
+            const headingList = headings.map(h => h.textContent.trim());
+            const viewportHeight = window.innerHeight;
+
+            // Find current heading - the one that's at or just passed the top of viewport
+            let currentIndex = -1;
+            for (let i = headings.length - 1; i >= 0; i--) {
+                const rect = headings[i].getBoundingClientRect();
+                // If heading is above middle of viewport, it's the current one
+                if (rect.top < viewportHeight / 2) {
+                    currentIndex = i;
+                    break;
+                }
+            }
+
+            // Navigate to next heading
+            const nextIndex = currentIndex + 1;
+            if (nextIndex < headings.length) {
+                headings[nextIndex].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return {
+                    status: 'navigated',
+                    total: headings.length,
+                    headings: headingList,
+                    fromIndex: currentIndex,
+                    targetIndex: nextIndex,
+                    targetText: headings[nextIndex].textContent.trim()
+                };
+            }
+            // At end - scroll to bottom of document
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            return {
+                status: 'scrolled_to_bottom',
+                total: headings.length,
+                headings: headingList
+            };
+        })();
+        """
+
+        print("DEBUG: About to call evaluateJavaScript")
+        webView.evaluateJavaScript(script) { result, error in
+            print("DEBUG: evaluateJavaScript callback executed")
+            if let error = error {
+                print("DEBUG: Navigate to next heading error: \(error)")
+            } else if let dict = result as? [String: Any] {
+                print("DEBUG: JavaScript result: \(dict)")
+                if let status = dict["status"] as? String {
+                    print("DEBUG: Status = \(status)")
+                    if status == "navigated", let target = dict["targetText"] as? String {
+                        print("DEBUG: Navigated to: \(target)")
+                    } else if status == "scrolled_to_bottom" {
+                        print("DEBUG: At end - scrolled to bottom of document")
+                    }
+                }
+                if let headings = dict["headings"] as? [String] {
+                    print("DEBUG: Available headings (\(headings.count)): \(headings.joined(separator: " | "))")
+                }
+            } else {
+                print("DEBUG: Result is not a dictionary: \(String(describing: result))")
+            }
+        }
+        print("DEBUG: evaluateJavaScript called (async)")
+    }
+
+    private func navigateToPreviousHeading() {
+        print("DEBUG: navigateToPreviousHeading() executing JavaScript...")
+        let script = """
+        (function() {
+            // Get all h2 headings, skip 'Table of Contents' heading
+            const allH2 = Array.from(document.querySelectorAll('h2[id]'));
+            const headings = allH2.filter(h => !h.textContent.trim().toLowerCase().includes('table of contents'));
+
+            if (headings.length === 0) {
+                return { status: 'no_headings' };
+            }
+
+            const scrollPos = window.scrollY;
+            const headingList = headings.map(h => h.textContent.trim());
+            const viewportHeight = window.innerHeight;
+
+            // Find current heading - the one that's at or just passed the top of viewport
+            let currentIndex = -1;
+            for (let i = headings.length - 1; i >= 0; i--) {
+                const rect = headings[i].getBoundingClientRect();
+                // If heading is above middle of viewport, it's the current one
+                if (rect.top < viewportHeight / 2) {
+                    currentIndex = i;
+                    break;
+                }
+            }
+
+            // Navigate to previous
+            if (currentIndex === -1) {
+                // We're past the last heading (at bottom) - go to last heading
+                const lastHeading = headings[headings.length - 1];
+                lastHeading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return {
+                    status: 'navigated',
+                    total: headings.length,
+                    headings: headingList,
+                    currentIndex: -1,
+                    targetIndex: headings.length - 1,
+                    targetText: lastHeading.textContent.trim()
+                };
+            } else if (currentIndex > 0) {
+                const targetHeading = headings[currentIndex - 1];
+                targetHeading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return {
+                    status: 'navigated',
+                    total: headings.length,
+                    headings: headingList,
+                    currentIndex: currentIndex,
+                    targetIndex: currentIndex - 1,
+                    targetText: targetHeading.textContent.trim()
+                };
+            } else {
+                // currentIndex === 0 - at first heading, scroll to top of document
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                return {
+                    status: 'scrolled_to_top',
+                    total: headings.length,
+                    headings: headingList
+                };
+            }
+        })();
+        """
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                print("Navigate to previous heading error: \(error)")
+            } else if let dict = result as? [String: Any] {
+                print("DEBUG: JavaScript result: \(dict)")
+                if let status = dict["status"] as? String {
+                    if status == "navigated", let target = dict["targetText"] as? String {
+                        print("DEBUG: Navigated to: \(target)")
+                    } else if status == "scrolled_to_top" {
+                        print("DEBUG: At start - scrolled to top of document")
+                    }
+                }
+                if let headings = dict["headings"] as? [String] {
+                    print("DEBUG: Available headings: \(headings.joined(separator: ", "))")
+                }
+            }
+        }
+    }
 }
 
 // MARK: - WKNavigationDelegate
 
 extension MarkdownViewController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        // Open external links in default browser
+        // Handle link navigation
         if navigationAction.navigationType == .linkActivated {
             if let url = navigationAction.request.url {
+                print("DEBUG: Link clicked - Full URL: \(url.absoluteString)")
+                print("DEBUG: Scheme: \(url.scheme ?? "nil"), Host: \(url.host ?? "nil"), Fragment: \(url.fragment ?? "nil")")
+                print("DEBUG: Path: \(url.path)")
+
+                // Check if this is an anchor link to the current document
+                // Anchor links will have the current file path with a fragment
+                if let fragment = url.fragment, !fragment.isEmpty {
+                    // Check if the URL points to the current document
+                    if let currentURL = webView.url,
+                       url.scheme == currentURL.scheme,
+                       url.host == currentURL.host,
+                       url.path == currentURL.path {
+                        print("DEBUG: Internal anchor link detected - allowing WebKit to handle")
+                        decisionHandler(.allow)
+                        return
+                    }
+                }
+
+                // Open external links in default browser
+                print("DEBUG: External link - opening in workspace")
                 NSWorkspace.shared.open(url)
                 decisionHandler(.cancel)
                 return
@@ -686,6 +1011,15 @@ class HTMLRenderer {
     private var currentColumnIndex: Int = 0
     private var lastRenderedLine: Int = 0
     private var totalLines: Int = 0
+
+    // Generate a URL-safe slug from heading text (matching GitHub/markdown convention)
+    private func generateSlug(from text: String) -> String {
+        return text
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9\\s-]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
 
     func render(document: Document, sourceText: String) -> String {
         // Count total lines in source
@@ -717,11 +1051,14 @@ class HTMLRenderer {
         switch markup {
         case let heading as Heading:
             let content = heading.children.map { renderMarkup($0) }.joined()
+            // Extract plain text for ID generation (strip HTML tags)
+            let plainText = heading.plainText
+            let headingId = generateSlug(from: plainText)
             let lineAttr = shouldShowLineNumber(for: heading) ? lineNumberAttribute(for: heading) : ""
             if shouldShowLineNumber(for: heading) {
                 updateLastRenderedLine(for: markup)
             }
-            return html + "<h\(heading.level)\(lineAttr)>\(content)</h\(heading.level)>\n"
+            return html + "<h\(heading.level) id=\"\(headingId)\"\(lineAttr)>\(content)</h\(heading.level)>\n"
 
         case let paragraph as Paragraph:
             let content = paragraph.children.map { renderMarkup($0) }.joined(separator: " ")
