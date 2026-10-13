@@ -67,6 +67,8 @@ class MarkdownViewController: NSViewController {
     private var fileWatcher: DispatchSourceFileSystemObject?
     private var fileDescriptor: Int32 = -1
     private var reloadDebounceWorkItem: DispatchWorkItem?
+    /// Text of the last successful render, compared against on reload to find changed lines.
+    private var lastRenderedSource: String?
 
     override func loadView() {
         // Create container view
@@ -229,6 +231,7 @@ class MarkdownViewController: NSViewController {
         stopWatchingFile()
 
         currentFileURL = url
+        lastRenderedSource = nil
         view.window?.title = "MD Viewer - \(url.lastPathComponent)"
 
         // Render the file
@@ -241,9 +244,65 @@ class MarkdownViewController: NSViewController {
     func renderMarkdown() {
         guard let fileURL = currentFileURL else { return }
 
+        // First render of this file: nothing to compare against or return to.
+        guard lastRenderedSource != nil else {
+            loadPage(for: fileURL, previousScrollY: nil)
+            return
+        }
+
+        webView.evaluateJavaScript("window.scrollY") { [weak self] result, _ in
+            // Another file may have been opened while the scroll position was being read.
+            guard let self = self, self.currentFileURL == fileURL else { return }
+            self.loadPage(for: fileURL, previousScrollY: (result as? NSNumber)?.doubleValue)
+        }
+    }
+
+    /// 1-based line numbers in `new` that were added or edited since `old`.
+    /// A pure deletion marks the line that now sits where the removed lines were.
+    static func changedLineNumbers(from old: String, to new: String) -> [Int] {
+        let oldLines = old.components(separatedBy: "\n")
+        let newLines = new.components(separatedBy: "\n")
+        let difference = newLines.difference(from: oldLines)
+        guard !difference.isEmpty else { return [] }
+
+        let removedOldIndexes = Set(difference.removals.map { change -> Int in
+            if case .remove(let offset, _, _) = change { return offset }
+            preconditionFailure("removals contains only .remove")
+        })
+        let insertedNewIndexes = Set(difference.insertions.map { change -> Int in
+            if case .insert(let offset, _, _) = change { return offset }
+            preconditionFailure("insertions contains only .insert")
+        })
+
+        // Walk both versions in step so each removal can be placed in the new version.
+        var changedIndexes = insertedNewIndexes
+        var oldIndex = 0
+        var newIndex = 0
+        while oldIndex < oldLines.count || newIndex < newLines.count {
+            if removedOldIndexes.contains(oldIndex) {
+                changedIndexes.insert(min(newIndex, newLines.count - 1))
+                oldIndex += 1
+            } else if insertedNewIndexes.contains(newIndex) {
+                newIndex += 1
+            } else {
+                oldIndex += 1
+                newIndex += 1
+            }
+        }
+        return changedIndexes.sorted().map { $0 + 1 }
+    }
+
+    private func loadPage(for fileURL: URL, previousScrollY: Double?) {
         do {
             // Read markdown content
             let markdownContent = try String(contentsOf: fileURL, encoding: .utf8)
+
+            let changedLines = lastRenderedSource.map {
+                Self.changedLineNumbers(from: $0, to: markdownContent)
+            } ?? []
+            lastRenderedSource = markdownContent
+            let changedLinesJSON = "[" + changedLines.map(String.init).joined(separator: ",") + "]"
+            let previousScrollYJS = previousScrollY.map { String($0) } ?? "null"
 
             // Convert markdown to HTML using swift-markdown
             let document = Document(parsing: markdownContent)
@@ -434,6 +493,13 @@ class MarkdownViewController: NSViewController {
                         user-select: none;
                         -webkit-user-select: none;
                     }
+                    /* Lines changed since the previous save. Declared after the table
+                       striping so a changed even row still shows the tint. */
+                    .recent-change,
+                    table tr.recent-change {
+                        background-color: rgba(255, 213, 79, 0.18);
+                        border-radius: 3px;
+                    }
                 </style>
                 \(mermaidScriptTag)
             </head>
@@ -503,6 +569,12 @@ class MarkdownViewController: NSViewController {
                           // Create iframe content with the rendered SVG and height reporting script
                           var iframeContent = '<!DOCTYPE html><html><head><style>body{margin:0;padding:8px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;}</style></head><body>' + result.svg + '<scr'+'ipt>window.addEventListener("load",function(){var h=Math.max(document.body.scrollHeight,document.documentElement.scrollHeight,document.body.offsetHeight);window.parent.postMessage({type:"resize",height:h},"*");});</scr'+'ipt></body></html>';
                           iframe.srcdoc = iframeContent;
+
+                          // Keep the source line range and any change highlight on the diagram
+                          ['data-line-start', 'data-line-end'].forEach(function(name) {
+                            if (pre.hasAttribute(name)) iframe.setAttribute(name, pre.getAttribute(name));
+                          });
+                          if (pre.classList.contains('recent-change')) iframe.classList.add('recent-change');
 
                           // Replace pre with iframe
                           pre.replaceWith(iframe);
@@ -606,6 +678,57 @@ class MarkdownViewController: NSViewController {
                   });
 
                   console.log('Keyboard navigation loaded. Use Shift+Up (twice for top), Shift+Down for TOC navigation.');
+                })();
+
+                // Highlight lines changed since the previous render and jump to the first one.
+                // With no visible change, return to where the reader was.
+                (function() {
+                  const changedLines = \(changedLinesJSON); // sorted, 1-based source lines
+                  const previousScrollY = \(previousScrollYJS);
+                  const highlighted = [];
+
+                  if (changedLines.length > 0) {
+                    function firstIndexAtOrAfter(line) {
+                      let low = 0, high = changedLines.length;
+                      while (low < high) {
+                        const mid = (low + high) >> 1;
+                        if (changedLines[mid] < line) low = mid + 1; else high = mid;
+                      }
+                      return low;
+                    }
+                    // Reverse document order visits the innermost element first, so a changed
+                    // list item or table row claims its line before the enclosing list or table.
+                    const claimedLines = new Set();
+                    const elements = Array.from(document.querySelectorAll('[data-line-start]')).reverse();
+                    elements.forEach(function(element) {
+                      const start = Number(element.dataset.lineStart);
+                      const end = Number(element.dataset.lineEnd);
+                      let claimsLine = false;
+                      for (let i = firstIndexAtOrAfter(start); i < changedLines.length && changedLines[i] <= end; i++) {
+                        if (!claimedLines.has(changedLines[i])) {
+                          claimedLines.add(changedLines[i]);
+                          claimsLine = true;
+                        }
+                      }
+                      if (claimsLine) {
+                        element.classList.add('recent-change');
+                        highlighted.push(element);
+                      }
+                    });
+                  }
+
+                  function settleScroll() {
+                    // Last pushed is first in document order.
+                    const firstChange = highlighted[highlighted.length - 1];
+                    if (firstChange) {
+                      firstChange.scrollIntoView({ block: 'center' });
+                    } else if (previousScrollY !== null) {
+                      window.scrollTo(0, previousScrollY);
+                    }
+                  }
+                  // Wait for images so their height doesn't shift the target after scrolling.
+                  if (document.readyState === 'complete') settleScroll();
+                  else window.addEventListener('load', settleScroll);
                 })();
                 </script>
             </body>
@@ -1130,12 +1253,13 @@ class HTMLRenderer {
 
         case let item as ListItem:
             let content = item.children.map { renderMarkup($0) }.joined()
+            let lineAttributes = sourceLineAttributes(for: item)
             if let checkbox = item.checkbox {
                 let checked = checkbox == .checked ? "checked" : ""
                 let checkboxHTML = "<input type=\"checkbox\" \(checked) disabled /> "
-                return "<li style=\"list-style-type: none;\">\(checkboxHTML)\(content)</li>\n"
+                return "<li\(lineAttributes) style=\"list-style-type: none;\">\(checkboxHTML)\(content)</li>\n"
             }
-            return "<li>\(content)</li>\n"
+            return "<li\(lineAttributes)>\(content)</li>\n"
 
         case let blockQuote as BlockQuote:
             let content = blockQuote.children.map { renderMarkup($0) }.joined()
@@ -1174,7 +1298,7 @@ class HTMLRenderer {
 
         case let tableHead as Table.Head:
             let rows = tableHead.children.map { renderMarkup($0) }.joined()
-            return "<thead>\n\(rows)</thead>\n"
+            return "<thead\(sourceLineAttributes(for: tableHead))>\n\(rows)</thead>\n"
 
         case let tableBody as Table.Body:
             let rows = tableBody.children.map { renderMarkup($0) }.joined()
@@ -1183,7 +1307,7 @@ class HTMLRenderer {
         case let tableRow as Table.Row:
             currentColumnIndex = 0
             let cells = tableRow.children.map { renderMarkup($0) }.joined()
-            return "<tr>\n\(cells)</tr>\n"
+            return "<tr\(sourceLineAttributes(for: tableRow))>\n\(cells)</tr>\n"
 
         case let tableCell as Table.Cell:
             // Determine if this is a header cell by checking parent hierarchy
@@ -1265,43 +1389,41 @@ class HTMLRenderer {
 
         for lineNum in startLine...endLine {
             lastRenderedLine = lineNum
-            html += "<div data-line=\"\(lineNum)\" class=\"blank-line\">&nbsp;</div>\n"
+            html += "<div data-line=\"\(lineNum)\" data-line-start=\"\(lineNum)\" data-line-end=\"\(lineNum)\" class=\"blank-line\">&nbsp;</div>\n"
         }
         return html
     }
 
     private func updateLastRenderedLine(for markup: Markup) {
-        // Update to the last line that this element occupies
-        if let range = markup.range {
-            let endLine: Int
-            if range.upperBound.column == 1 {
-                // If upperBound is at column 1, it's at the start of the next line
-                endLine = range.upperBound.line - 1
-            } else {
-                // If upperBound is mid-line, that's the last line
-                endLine = range.upperBound.line
-            }
-            lastRenderedLine = max(lastRenderedLine, endLine)
+        if let lines = sourceLines(of: markup) {
+            lastRenderedLine = max(lastRenderedLine, lines.upperBound)
         }
     }
 
+    /// Inclusive source lines an element occupies.
+    private func sourceLines(of markup: Markup) -> ClosedRange<Int>? {
+        guard let range = markup.range else { return nil }
+        let startLine = range.lowerBound.line
+        // An upperBound at column 1 sits at the start of the next line,
+        // so the last line with content is the one before it.
+        let endLine = range.upperBound.column == 1 ? range.upperBound.line - 1 : range.upperBound.line
+        return startLine...max(startLine, endLine)
+    }
+
+    /// Machine-readable line range, used by the page to find changed lines.
+    /// Unlike `data-line`, these carry no gutter label, so nested elements can have them.
+    private func sourceLineAttributes(for markup: Markup) -> String {
+        guard let lines = sourceLines(of: markup) else { return "" }
+        return " data-line-start=\"\(lines.lowerBound)\" data-line-end=\"\(lines.upperBound)\""
+    }
+
     private func lineNumberAttribute(for markup: Markup) -> String {
-        guard let range = markup.range else {
+        guard let lines = sourceLines(of: markup) else {
             return ""
         }
-        let startLine = range.lowerBound.line
-        // upperBound.line is the first line of the next element, so the last line
-        // of this element is upperBound.line - 1, BUT we want inclusive end
-        // Check if range spans to a newline character
-        let endLine: Int
-        if range.upperBound.column == 1 {
-            // If upperBound is at column 1, it means it's at the start of the next line
-            // so the actual last line with content is upperBound.line - 1
-            endLine = range.upperBound.line - 1
-        } else {
-            // If upperBound is mid-line, that's the last line
-            endLine = range.upperBound.line
-        }
+        let startLine = lines.lowerBound
+        let endLine = lines.upperBound
+        let rangeAttributes = sourceLineAttributes(for: markup)
 
         // If element spans multiple lines, show as range with abbreviated end
         if endLine > startLine {
@@ -1320,9 +1442,9 @@ class HTMLRenderer {
 
             // Show abbreviated end (only the differing suffix)
             let endSuffix = String(endStr.dropFirst(commonPrefixLen))
-            return " data-line=\"\(startLine)-\(endSuffix)\""
+            return " data-line=\"\(startLine)-\(endSuffix)\"" + rangeAttributes
         } else {
-            return " data-line=\"\(startLine)\""
+            return " data-line=\"\(startLine)\"" + rangeAttributes
         }
     }
 
